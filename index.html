@@ -78,7 +78,7 @@
         <tr><td><code>穿刺：姓名（3紫）</code></td><td>5×PBMC</td></tr>
         <tr><td><code>穿刺：姓名（5紫）</code></td><td>10×PBMC</td></tr>
       </table>
-      <p class="hint">行首是数字 = 病房血（数字忽略）；行首含「穿刺」= 穿刺血。冒号可省略，姓名可用逗号或空格分隔。「2紫2花」也写作「紫2花2」「2花2紫」等；穿刺血未标注时默认按 3紫（5紫 需注明）。姓名顺序严格按输入顺序。</p>
+      <p class="hint">行首是数字 = 病房血（数字忽略）；行首含「穿刺」= 穿刺血。冒号可省略，姓名可用逗号或空格分隔。「2紫2花」也写作「紫2花2」「2花2紫」等；穿刺血未标注时默认按 3紫（5紫 需注明）。输出顺序：穿刺血 → 花头管（花）→ 普通病房血（紫），同类内按输入顺序。</p>
     </details>
   </div>
 </div>
@@ -120,6 +120,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     var records = [];
     var errors = [];
     var lines = text.split(/\r?\n/);
+    var nameSeq = 0;
     lines.forEach(function (raw, idx) {
       var line = raw.trim();
       if (!line) return;
@@ -138,6 +139,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       if (!names.length) { errors.push('第' + (idx + 1) + '行没有姓名：' + line); return; }
 
       names.forEach(function (name) {
+        var seq = nameSeq++;
         var base = name, isFlower = false, tubes = null;
         var anno = base.match(/[（(]([^（）()]*)[）)]/);
         if (anno) {
@@ -154,19 +156,29 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 
         if (bloodType === 'ward') {
           if (isFlower) {
-            records.push({ name: base, key: 'PBMC', count: 5 });
-            records.push({ name: base, key: 'PBMC_HUA', count: 5 });
-            records.push({ name: base, key: 'PLASMA', count: 4 });
-            records.push({ name: base, key: 'PLASMA_HUA', count: 6 });
+            records.push({ name: base, key: 'PBMC', count: 5, cat: 'ward', seq: seq });
+            records.push({ name: base, key: 'PBMC_HUA', count: 5, cat: 'flower', seq: seq });
+            records.push({ name: base, key: 'PLASMA', count: 4, cat: 'ward', seq: seq });
+            records.push({ name: base, key: 'PLASMA_HUA', count: 6, cat: 'flower', seq: seq });
           } else {
-            records.push({ name: base, key: 'PBMC', count: 5 });
-            records.push({ name: base, key: 'PLASMA', count: 4 });
+            records.push({ name: base, key: 'PBMC', count: 5, cat: 'ward', seq: seq });
+            records.push({ name: base, key: 'PLASMA', count: 4, cat: 'ward', seq: seq });
           }
         } else { // 穿刺血
-          records.push({ name: base, key: 'PBMC', count: (tubes === 5) ? 10 : 5 });
+          records.push({ name: base, key: 'PBMC', count: (tubes === 5) ? 10 : 5, cat: 'puncture', seq: seq });
         }
       });
     });
+
+    // 输出顺序：穿刺血 → 花头管（花）→ 普通病房血（紫）；同类内按输入顺序，再按 PBMC→plasma
+    var CAT_RANK = { puncture: 0, flower: 1, ward: 2 };
+    var TYPE_RANK = { PBMC: 0, PBMC_HUA: 0, PLASMA: 1, PLASMA_HUA: 1 };
+    records.sort(function (a, b) {
+      if (CAT_RANK[a.cat] !== CAT_RANK[b.cat]) return CAT_RANK[a.cat] - CAT_RANK[b.cat];
+      if (a.seq !== b.seq) return a.seq - b.seq;
+      return TYPE_RANK[a.key] - TYPE_RANK[b.key];
+    });
+
     return { records: records, errors: errors };
   }
 
@@ -179,10 +191,8 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 
   function buildXlsRows(records) {
     var s = TYPE_STR.xls;
-    var pb = records.filter(function (r) { return r.key === 'PBMC' || r.key === 'PBMC_HUA'; });
-    var pl = records.filter(function (r) { return r.key === 'PLASMA' || r.key === 'PLASMA_HUA'; });
     var rows = [['姓名', '类型']];
-    pb.concat(pl).forEach(function (r) {
+    records.forEach(function (r) {
       for (var i = 0; i < r.count; i++) rows.push([r.name, s[r.key]]);
     });
     return rows;

@@ -20,7 +20,7 @@
   textarea:focus { outline: none; border-color: var(--brand); }
   .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
   .field { display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--muted); }
-  .field input { width: 120px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font-size: 14px; }
+  .field input { width: 130px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font-size: 14px; }
   button { border: none; border-radius: 8px; padding: 10px 18px; font-size: 15px; cursor: pointer; background: var(--brand); color: #fff; }
   button:hover { background: var(--brand-dark); }
   button.secondary { background: #eef2ff; color: var(--brand); }
@@ -40,14 +40,14 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>血样标签生成器 <span class="ver">v6</span></h1>
+  <h1>血样标签生成器 <span class="ver">v7</span></h1>
   <p class="sub">把只含姓名的原始清单，按规则展开成标签表格（txt / xls）</p>
 
   <div class="card">
     <h2>输入</h2>
     <textarea id="input" placeholder="106：张三，李四，王五&#10;42 赵六 钱七 孙八&#10;43：周九（2紫2花），吴十&#10;穿刺：郑十一&#10;穿刺：刘二（5紫）"></textarea>
     <div class="row">
-      <label class="field">日期（可选）<input id="date" placeholder="如 261012"></label>
+      <label class="field">日期（可选）<input id="date" placeholder="如 2026-10-16"></label>
       <button id="btnExample" class="secondary" type="button">填入示例</button>
       <button id="btnClear" class="secondary" type="button">清空</button>
     </div>
@@ -65,7 +65,7 @@
       <button id="btnTxt" type="button">下载 txt</button>
       <button id="btnXls" type="button">下载 xls</button>
     </div>
-    <p class="hint" style="margin-top:10px">txt / xls 文件名都用「日期」命名（未填日期时默认「标签」）。</p>
+    <p class="hint" style="margin-top:10px">txt / xls 文件名都用「日期」命名（未填日期时默认「标签」）；xls 含「日期」列。</p>
   </div>
 
   <div class="card rules">
@@ -79,7 +79,7 @@
         <tr><td><code>穿刺：姓名（3紫）</code></td><td>5×PBMC</td></tr>
         <tr><td><code>穿刺：姓名（5紫）</code></td><td>10×PBMC</td></tr>
       </table>
-      <p class="hint">行首是数字 = 病房血（数字忽略）；行首含「穿刺」= 穿刺血。冒号可省略，姓名可用逗号或空格分隔。「2紫2花」也写作「紫2花2」「2花2紫」等；穿刺血未标注时默认按 3紫（5紫 需注明）。输出顺序：穿刺血 → 花头管（花）→ 普通病房血（紫），同类内按输入顺序；xls 内部保持「PBMC 块 + plasma 块」结构。</p>
+      <p class="hint">行首是数字 = 病房血（数字忽略）；行首含「穿刺」= 穿刺血。冒号可省略，姓名可用逗号或空格分隔。「2紫2花」也写作「紫2花2」「2花2紫」等；穿刺血未标注时默认按 3紫（5紫 需注明）。输出顺序：穿刺血 → 花头管（花）→ 普通病房血（紫），同类内按输入顺序；xls 内部保持「PBMC 块 + plasma 块」结构，含「姓名/类型/日期」三列。</p>
     </details>
   </div>
 </div>
@@ -88,13 +88,12 @@
 (function () {
   'use strict';
 
-  // 类型键 -> 各输出格式下的显示文本
   var TYPE_STR = {
     txt: { PBMC: 'PBMC', PBMC_HUA: 'PBMC（花）', PLASMA: 'plasma', PLASMA_HUA: 'plasma（花）' },
     xls: { PBMC: 'PBMC', PBMC_HUA: 'PBMC（花）', PLASMA: 'Plasma', PLASMA_HUA: 'Plasma（花）' }
   };
 
-  // ===== 自定义 BIFF8 .xls 生成器（与 Dlabel 参考文件同格式：SST 共享字符串表 + 压缩 ASCII）=====
+  // ===== BIFF8 xls 生成器（复刻 Dlabel 参考文件结构）=====
   function le16(v) { return [(v) & 0xFF, (v >>> 8) & 0xFF]; }
   function le32(v) { return [(v) & 0xFF, (v >>> 8) & 0xFF, (v >>> 16) & 0xFF, (v >>> 24) & 0xFF]; }
   function cat() {
@@ -112,58 +111,56 @@
     out.set(d, 4);
     return out;
   }
+  function hexToBytes(hex) {
+    var out = new Uint8Array(hex.length / 2), i;
+    for (i = 0; i < hex.length; i += 2) out[i / 2] = parseInt(hex.substr(i, 2), 16);
+    return out;
+  }
   function sstString(s) {
     var chars = Array.from(s), i, latin1 = true;
     for (i = 0; i < chars.length; i++) if (chars[i].codePointAt(0) >= 0x100) { latin1 = false; break; }
     var parts = le16(chars.length);
-    if (latin1) {
-      parts.push(0x00);
-      for (i = 0; i < chars.length; i++) parts.push(chars[i].codePointAt(0) & 0xFF);
-    } else {
-      parts.push(0x01);
-      for (i = 0; i < chars.length; i++) { var cp = chars[i].codePointAt(0); parts.push(cp & 0xFF, cp >>> 8); }
-    }
+    if (latin1) { parts.push(0x00); for (i = 0; i < chars.length; i++) parts.push(chars[i].codePointAt(0) & 0xFF); }
+    else { parts.push(0x01); for (i = 0; i < chars.length; i++) { var cp = chars[i].codePointAt(0); parts.push(cp & 0xFF, cp >>> 8); } }
     return Uint8Array.from(parts);
   }
-  var BOF_GLOBALS = Uint8Array.from([0x00, 0x06, 0x05, 0x00, 0xbb, 0x0d, 0xcc, 0x07, 0x00, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00]);
-  var BOF_SHEET = Uint8Array.from([0x00, 0x06, 0x10, 0x00, 0xbb, 0x0d, 0xcc, 0x07, 0x00, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00]);
-  var CODEPAGE = Uint8Array.from([0xb0, 0x04]);
-  var FONT_ARIAL = Uint8Array.from([0xc8, 0x00, 0x00, 0x00, 0xff, 0x7f, 0x90, 0x01, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x05, 0x01, 0x41, 0x00, 0x72, 0x00, 0x69, 0x00, 0x61, 0x00, 0x6c, 0x00]);
-  var XF = Uint8Array.from([0x00, 0x00, 0x00, 0x00, 0xf5, 0xff, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0]);
 
-  function buildWorkbook(cells) {
-    var uniq = [], map = new Map(), i;
-    var cellIdx = cells.map(function (cell) {
-      if (!map.has(cell.str)) { map.set(cell.str, uniq.length); uniq.push(cell.str); }
-      return { r: cell.r, c: cell.c, i: map.get(cell.str) };
-    });
-    var sstData = cat(Uint8Array.from(le32(cellIdx.length)), Uint8Array.from(le32(uniq.length)), ...uniq.map(sstString));
+  var GLOBALS_PREFIX = hexToBytes('0908100000060500bb0dcc070000000006000000e1000200b004c10002000000e20000005c00700004000043616c6320202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202042000200b004610102000000c00100003d01020001009c0002000e00af0102000000bc01020000003d0012000000000000400020380000000000010058024000020000008d00020000002200020000000e0002000100b70102000000da000200000031001a00c8000000ff7f9001000000020000050141007200690061006c0031001a00c8000000ff7f9001000000000000050141007200690061006c0031001a00c8000000ff7f9001000000000000050141007200690061006c0031001a00c8000000ff7f9001000000000000050141007200690061006c0031001e00dc000000ff7f90010000000001000701430061006c00690062007200690031003000c8000000ff7f900100000002000010014e006f0074006f002000530061006e007300200043004a004b002000530043001e040c00a40007000047656e6572616ce00014000000a400f5ff200000000000000000000000c020e000140001000000f5ff200000f40000000000000000c020e000140001000000f5ff200000f40000000000000000c020e000140002000000f5ff200000f40000000000000000c020e000140002000000f5ff200000f40000000000000000c020e000140000000000f5ff200000f40000000000000000c020e000140000000000f5ff200000f40000000000000000c020e000140000000000f5ff200000f40000000000000000c020e000140000000000f5ff200000f40000000000000000c020e000140000000000f5ff200000f40000000000000000c020e000140000000000f5ff200000f40000000000000000c020e000140000000000f5ff200000f40000000000000000c020e000140000000000f5ff200000f40000000000000000c020e000140000000000f5ff200000f40000000000000000c020e000140000000000f5ff200000f40000000000000000c020e00014000000a4000100200000000000000000000000c020e000140001002b00f5ff200000f00000000000000000c020e000140001002900f5ff200000f00000000000000000c020e000140001002c00f5ff200000f00000000000000000c020e000140001002a00f5ff200000f00000000000000000c020e000140001000900f5ff200000f00000000000000000c020e00014000500a400f5ff200000000000000000000000c020e00014000600a4000100200000080000000000000000c02093020400008000ff93020400108003ff93020400118006ff93020400128004ff93020400138007ff93020400148005ff93020b0015000600004e6f726d616c600102000000');
+  var SHEET_PREAMBLE = hexToBytes('0908100000061000bb0dcc0700000000060000000c00020064000f000200010011000200000010000800fca9f1d24d62503f5f00020001008000080000000000000000002502040000002c0181000200c1042a00020000002b0002000000820002000100140000001500000083000200000084000200000026000800676666666666e63f27000800676666666666e63f28000800000000000000e83f29000800000000000000e83fa10022000900640000000100010002002c012c01180c0683c160e03f180c0683c160e03f01005500020008007d000c000000000001730f00000000007d000c0001000100017d0f00000000007d000c0002000200016e0f00000000007d000c0003000001ae080f0000000000');
+  var COUNTRY = hexToBytes('8c00040001000100');
+
+  function buildWorkbook(rows3) {
+    var uniq = [], map = new Map(), i, c;
+    var cells = [];
+    for (i = 0; i < rows3.length; i++) {
+      for (c = 0; c < 3; c++) {
+        var s = rows3[i][c];
+        if (!map.has(s)) { map.set(s, uniq.length); uniq.push(s); }
+        cells.push({ r: i, c: c, i: map.get(s), xf: (i === 0) ? 22 : 15 });
+      }
+    }
+    var sstData = cat(Uint8Array.from(le32(cells.length)), Uint8Array.from(le32(uniq.length)), ...uniq.map(sstString));
     var sstRec = rec(0x00FC, sstData);
 
-    var maxRow = 0, maxCol = 0;
-    for (i = 0; i < cellIdx.length; i++) { if (cellIdx[i].r > maxRow) maxRow = cellIdx[i].r; if (cellIdx[i].c > maxCol) maxCol = cellIdx[i].c; }
-    var dims = Uint8Array.from(le32(0).concat(le32(maxRow + 1), le16(0), le16(maxCol + 1), [0x00, 0x00]));
-    var sheetParts = [rec(0x0809, BOF_SHEET), rec(0x0200, dims)];
-    for (i = 0; i < cellIdx.length; i++) {
-      sheetParts.push(rec(0x00FD, Uint8Array.from(le16(cellIdx[i].r).concat(le16(cellIdx[i].c), le16(0), le32(cellIdx[i].i)))));
+    var sheetParts = [SHEET_PREAMBLE];
+    sheetParts.push(rec(0x0200, Uint8Array.from(le32(0).concat(le32(rows3.length), le16(0), le16(3), [0, 0]))));
+    for (i = 0; i < rows3.length; i++) {
+      sheetParts.push(rec(0x0208, Uint8Array.from(le16(i).concat(le16(0), le16(3), le16(300), le16(0), le16(0), le16(0x0100), le16(15)))));
+      for (c = 0; c < 3; c++) {
+        var cell = cells[i * 3 + c];
+        sheetParts.push(rec(0x00FD, Uint8Array.from(le16(i).concat(le16(c), le16(cell.xf), le32(cell.i)))));
+      }
     }
     sheetParts.push(rec(0x000A, new Uint8Array(0)));
     var sheetStream = cat.apply(null, sheetParts);
 
-    var globalsParts = [rec(0x0809, BOF_GLOBALS), rec(0x0042, CODEPAGE), rec(0x0031, FONT_ARIAL)];
-    for (i = 0; i < 16; i++) globalsParts.push(rec(0x00E0, XF));
     var sheetName = 'sheet1 -1';
     var sheetNameBytes = [];
     for (i = 0; i < sheetName.length; i++) sheetNameBytes.push(sheetName.charCodeAt(i) & 0xFF);
-    var prefixLen = cat.apply(null, globalsParts).length;
     var boundsheetRecLen = 4 + (4 + 2 + 1 + 1 + sheetNameBytes.length);
-    var eofLen = 4;
-    var sheetPos = prefixLen + boundsheetRecLen + sstRec.length + eofLen;
+    var sheetPos = GLOBALS_PREFIX.length + boundsheetRecLen + COUNTRY.length + sstRec.length + 4;
     var boundsheetData = Uint8Array.from(le32(sheetPos).concat(le16(0), [sheetNameBytes.length, 0x00], sheetNameBytes));
-    globalsParts.push(rec(0x0085, boundsheetData));
-    globalsParts.push(sstRec);
-    globalsParts.push(rec(0x000A, new Uint8Array(0)));
-    var globals = cat.apply(null, globalsParts);
+    var globals = cat(GLOBALS_PREFIX, rec(0x0085, boundsheetData), COUNTRY, sstRec, rec(0x000A, new Uint8Array(0)));
 
     return cat(globals, sheetStream);
   }
@@ -186,39 +183,29 @@
 
   function buildCfb(workbook) {
     var SECTOR = 512, minLen = 4096;
-    var wb = workbook;
-    if (wb.length < minLen) { var p = new Uint8Array(minLen); p.set(wb); wb = p; }
-    var nData = Math.ceil(wb.length / SECTOR);
+    var paddedLen = Math.max(minLen, Math.ceil(workbook.length / SECTOR) * SECTOR);
+    var wb = new Uint8Array(paddedLen);
+    wb.set(workbook);
+    var nData = paddedLen / SECTOR;
     var firstDataSector = 2;
     var FATSECT = 0xFFFFFFFD, ENDOFCHAIN = 0xFFFFFFFE, FREESECT = 0xFFFFFFFF, i;
-
     var fat = new Uint8Array(SECTOR);
     var fatDv = new DataView(fat.buffer);
     for (i = 0; i < 128; i++) fatDv.setUint32(i * 4, FREESECT, true);
     fatDv.setUint32(0, FATSECT, true);
     fatDv.setUint32(4, ENDOFCHAIN, true);
     for (i = 0; i < nData; i++) { var sid = firstDataSector + i; fatDv.setUint32(sid * 4, (i === nData - 1) ? ENDOFCHAIN : (sid + 1), true); }
-
     var header = new Uint8Array(SECTOR);
     var hd = new DataView(header.buffer);
     header.set([0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1], 0);
-    hd.setUint16(24, 0x003E, true);
-    hd.setUint16(26, 0x0003, true);
-    hd.setUint16(28, 0xFFFE, true);
-    hd.setUint16(30, 9, true);
-    hd.setUint16(32, 6, true);
-    hd.setUint32(44, 1, true);
-    hd.setUint32(48, 1, true);
-    hd.setUint32(56, 4096, true);
-    hd.setUint32(60, ENDOFCHAIN, true);
-    hd.setUint32(68, ENDOFCHAIN, true);
-    hd.setUint32(76, 0, true);
+    hd.setUint16(24, 0x003E, true); hd.setUint16(26, 0x0003, true); hd.setUint16(28, 0xFFFE, true);
+    hd.setUint16(30, 9, true); hd.setUint16(32, 6, true);
+    hd.setUint32(44, 1, true); hd.setUint32(48, 1, true); hd.setUint32(56, 4096, true);
+    hd.setUint32(60, ENDOFCHAIN, true); hd.setUint32(68, ENDOFCHAIN, true); hd.setUint32(76, 0, true);
     for (i = 1; i < 109; i++) hd.setUint32(76 + i * 4, FREESECT, true);
-
     var dir = new Uint8Array(SECTOR);
     writeDirEntry(dir, 0, 'Root Entry', 0x05, 0xFFFFFFFF, 0xFFFFFFFF, 1, ENDOFCHAIN, 0);
     writeDirEntry(dir, 128, 'Workbook', 0x02, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, firstDataSector, wb.length);
-
     var dataParts = [];
     for (i = 0; i < nData; i++) dataParts.push(wb.slice(i * SECTOR, i * SECTOR + SECTOR));
     return cat.apply(null, [header, fat, dir].concat(dataParts));
@@ -233,7 +220,6 @@
     lines.forEach(function (raw, idx) {
       var line = raw.trim();
       if (!line) return;
-
       var bloodType = null, rest = null;
       var wm = line.match(/^(\d+)[：:\s]+(.*)$/);
       if (wm) { bloodType = 'ward'; rest = wm[2]; }
@@ -242,26 +228,19 @@
         if (pm) { bloodType = 'puncture'; rest = pm[2]; }
         else { errors.push('第' + (idx + 1) + '行无法识别（行首应为数字或「穿刺」）：' + line); return; }
       }
-
       var names = rest.split(/[，,\s]+/).map(function (s) { return s.trim(); }).filter(Boolean);
       if (!names.length) { errors.push('第' + (idx + 1) + '行没有姓名：' + line); return; }
-
       names.forEach(function (name) {
         var seq = nameSeq++;
         var base = name, isFlower = false, tubes = null;
         var anno = base.match(/[（(]([^（）()]*)[）)]/);
         if (anno) {
           var at = anno[1];
-          if (at.indexOf('紫') >= 0 && at.indexOf('花') >= 0) {
-            isFlower = true;
-          } else {
-            var tm = at.match(/([35])紫/) || at.match(/紫([35])/);
-            if (tm) tubes = parseInt(tm[1], 10);
-          }
+          if (at.indexOf('紫') >= 0 && at.indexOf('花') >= 0) isFlower = true;
+          else { var tm = at.match(/([35])紫/) || at.match(/紫([35])/); if (tm) tubes = parseInt(tm[1], 10); }
           base = base.replace(/[（(][^（）()]*[）)]/g, '').trim();
         }
         if (!base) { errors.push('第' + (idx + 1) + '行姓名为空：' + name); return; }
-
         if (bloodType === 'ward') {
           if (isFlower) {
             records.push({ name: base, key: 'PBMC', count: 5, cat: 'ward', seq: seq });
@@ -277,7 +256,6 @@
         }
       });
     });
-
     var CAT_RANK = { puncture: 0, flower: 1, ward: 2 };
     var TYPE_RANK = { PBMC: 0, PBMC_HUA: 0, PLASMA: 1, PLASMA_HUA: 1 };
     records.sort(function (a, b) {
@@ -285,7 +263,6 @@
       if (a.seq !== b.seq) return a.seq - b.seq;
       return TYPE_RANK[a.key] - TYPE_RANK[b.key];
     });
-
     return { records: records, errors: errors };
   }
 
@@ -296,20 +273,15 @@
     return lines.join('\r\n');
   }
 
-  function buildXlsCells(records) {
+  function buildXlsRows3(records, dateStr) {
     var s = TYPE_STR.xls;
     var pb = records.filter(function (r) { return r.key === 'PBMC' || r.key === 'PBMC_HUA'; });
     var pl = records.filter(function (r) { return r.key === 'PLASMA' || r.key === 'PLASMA_HUA'; });
-    var cells = [{ r: 0, c: 0, str: '姓名' }, { r: 0, c: 1, str: '类型' }];
-    var row = 1;
+    var rows = [['姓名', '类型', '日期']];
     pb.concat(pl).forEach(function (r) {
-      for (var i = 0; i < r.count; i++) {
-        cells.push({ r: row, c: 0, str: r.name });
-        cells.push({ r: row, c: 1, str: s[r.key] });
-        row++;
-      }
+      for (var i = 0; i < r.count; i++) rows.push([r.name, s[r.key], dateStr || '']);
     });
-    return cells;
+    return rows;
   }
 
   function download(blob, filename) {
@@ -321,7 +293,6 @@
   }
 
   function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
-
   function $(id) { return document.getElementById(id); }
 
   function render() {
@@ -329,7 +300,6 @@
     var records = parsed.records, errors = parsed.errors;
     var total = 0; records.forEach(function (r) { total += r.count; });
     $('stat').textContent = records.length ? ('共 ' + records.length + ' 条（姓名×标签），合计 ' + total + ' 张标签') : '';
-
     var s = TYPE_STR.txt;
     if (records.length) {
       var html = '<table><tr><th>组数</th><th>姓名</th><th>标签</th></tr>';
@@ -362,10 +332,9 @@
   $('btnXls').addEventListener('click', function () {
     var parsed = parseInput($('input').value);
     if (!parsed.records.length) { alert('没有可下载的内容，请先输入'); return; }
-    var cells = buildXlsCells(parsed.records);
-    var wb = buildWorkbook(cells);
-    var xls = buildCfb(wb);
     var date = $('date').value.trim();
+    var rows3 = buildXlsRows3(parsed.records, date);
+    var xls = buildCfb(buildWorkbook(rows3));
     var fn = date ? (date + '.xls') : '标签.xls';
     download(new Blob([xls], { type: 'application/vnd.ms-excel' }), fn);
   });

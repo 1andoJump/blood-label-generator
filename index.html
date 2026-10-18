@@ -64,7 +64,7 @@
       <button id="btnTxt" type="button">下载 txt</button>
       <button id="btnXls" type="button">下载 xls</button>
     </div>
-    <p class="hint" style="margin-top:10px">txt 文件名用「日期」命名（PC 版 Dlabel 以文件名作为标签日期）；xls 不含日期列。</p>
+    <p class="hint" style="margin-top:10px">txt / xls 文件名都用「日期」命名（未填日期时默认「标签」）；xls 不含日期列。</p>
   </div>
 
   <div class="card rules">
@@ -252,7 +252,9 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     var ws = XLSX.utils.aoa_to_sheet(rows);
     var wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'sheet1');
-    XLSX.writeFile(wb, '标签.xls', { bookType: 'biff8' });
+    var date = $('date').value.trim();
+    var fn = date ? (date + '.xls') : '标签.xls';
+    XLSX.writeFile(wb, fn, { bookType: 'biff8', bookSST: true });
   });
 
   render();

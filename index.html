@@ -191,8 +191,10 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 
   function buildXlsRows(records) {
     var s = TYPE_STR.xls;
+    var pb = records.filter(function (r) { return r.key === 'PBMC' || r.key === 'PBMC_HUA'; });
+    var pl = records.filter(function (r) { return r.key === 'PLASMA' || r.key === 'PLASMA_HUA'; });
     var rows = [['姓名', '类型']];
-    records.forEach(function (r) {
+    pb.concat(pl).forEach(function (r) {
       for (var i = 0; i < r.count; i++) rows.push([r.name, s[r.key]]);
     });
     return rows;
